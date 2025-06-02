@@ -5,6 +5,11 @@
         "stdlib.h": "c",
         "string.h": "c",
         "stdio.h": "c",
-        "pcap.h": "c"
+        "pcap.h": "c",
+        "stdbool.h": "c",
+        "udp.h": "c",
+        "ip6.h": "c",
+        "if_ether.h": "c",
+        "cstdlib": "c"
     }
 }
