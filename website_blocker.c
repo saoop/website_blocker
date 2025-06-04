@@ -20,83 +20,70 @@
 #include "types.h"
 #include "ip_helper.h"
 #include "logging_helper.h"
-
-
+#include "file_helper.h"
 
 volatile sig_atomic_t interrupted = 0;
-settings global_settings = {0, 0}; // Default settings
+Settings global_settings = {15, 16}; // Default Settings
 
-void get_ipv4_ipv6(const char* domain, string_array* ipv4s, string_array* ipv6s) {
-    /*
-    This function retrieves both IPv4 and IPv6 addresses for a given domain name.
-    It fills the provided string arrays with the respective IP addresses.
-    */
-
-    printf("Retrieving IPs for domain: %s\n", domain);
-    struct addrinfo hints, *res, *p;
-    char ipstr6[INET6_ADDRSTRLEN];
-    char ipstr4[INET_ADDRSTRLEN];
-    
-    memset(&hints, 0, sizeof hints);
-    hints.ai_family = AF_UNSPEC; // AF_INET or AF_INET6 to force version
-    hints.ai_socktype = SOCK_STREAM;
-
-    if (getaddrinfo(domain, NULL, &hints, &res) != 0) {
-        perror("getaddrinfo error");
-        return;
+void block_domain(DomainInfo * domain){
+    domain->is_blocked = true;
+    domain->last_time_blocked = time(NULL);
+    for (int i = 0; i < domain->ipv4s.count; i++) {
+        block_ipv4(domain->ipv4s.arr[i]);
     }
-    ipv4s->arr = NULL;
-    ipv4s->count = 0;
-    ipv6s->arr = NULL;
-    ipv6s->count = 0;
+    for (int i = 0; i < domain->ipv6s.count; i++) {
+        block_ipv6(domain->ipv6s.arr[i]);
+    }
+}
+void unblock_domain(DomainInfo * domain){
+    domain->current_time_on_domain = 0;
+    domain->is_blocked = false;
+    domain->last_time_blocked = (time_t)0;
+    domain->last_time_packet_received = (time_t)0;
+    for (int i = 0; i < domain->ipv4s.count; i++) {
+        unblock_ip(domain->ipv4s.arr[i], IPV4);
+    }
+    for (int i = 0; i < domain->ipv6s.count; i++) {
+        unblock_ip(domain->ipv6s.arr[i], IPV6);
+    }
+}
 
+void setup_domains(DomainArray* domains) {
+    // Read domains from the config file.
+    load_domain_array(domains, "domains.bin");
 
-    for (p = res; p != NULL; p = p->ai_next) {
-        // void *addr;
-        printf("Adding IPs to arrays...\n");
+    // If the program was just booted we have to check when the domains were last blocked
+    time_t current_time = time(NULL);
 
-        if (p->ai_family == AF_INET) { // IPv4
-            printf("IPv4 address found.\n");
-            struct sockaddr_in *ipv4 = (struct sockaddr_in *)p->ai_addr;
-            // addr = &(ipv4->sin_addr);
-            inet_ntop(p->ai_family, &(ipv4->sin_addr), ipstr4, sizeof ipstr4);
-            printf("IPv4: %s\n", ipstr4);
-            ipv4s->arr = realloc(ipv4s->arr, (ipv4s->count + 1) * sizeof(char*));
-            ipv4s->arr[ipv4s->count++] = strdup(ipstr4);
-        } else if (p->ai_family == AF_INET6) { // IPv6
-            struct sockaddr_in6 *ipv6 = (struct sockaddr_in6 *)p->ai_addr;
-            // addr = &(ipv6->sin6_addr);
-            inet_ntop(p->ai_family, &(ipv6->sin6_addr), ipstr6, sizeof ipstr6);
-            ipv6s->arr = realloc(ipv6s->arr, (ipv6s->count + 1) * sizeof(char*));
-            ipv6s->arr[ipv6s->count++] = strdup(ipstr6);
-            printf("IPv6: %s\n", ipstr6);
+    for (int i = 0; i < domains->count; i++) {
+        time_t last_time_blocked = domains->arr[i].last_time_blocked;
+            // Get hours and minutes of the last block
+        struct tm *tm_info = localtime(&last_time_blocked);
+        int last_block_hour = tm_info->tm_hour;
+        int last_block_minute = tm_info->tm_min;
+
+        int hours_between_block_and_reset = global_settings.hour_to_reset - last_block_hour;
+        int minutes_between_block_and_reset = global_settings.minute_to_reset - last_block_minute;
+        int potential_reset = last_time_blocked + hours_between_block_and_reset * 3600 + minutes_between_block_and_reset * 60;
+
+        if (domains->arr[i].is_blocked){
+            if (last_time_blocked - current_time >= 24 * 3600 || current_time > potential_reset) {
+                // If the last block was more than 24 hours ago, reset the domain OR if the current time is past the reset time
+                unblock_domain(&domains->arr[i]);
+            }
+        } else {
+            // We have to check if the domain was not blocked and clear it from time on the domain if the
+            // current time is past the reset time. 
+            if (current_time > potential_reset) {
+                unblock_domain(&domains->arr[i]);
+            }
         }
+        
     }
 
-    printf("Freeing addrinfo...\n");
-
-    freeaddrinfo(res);
 }
 
-domain_array get_domain_infos(){
-    // Later use a config file for now just hardcode the values
-    printf("Retrieving domain information...\n");
-    domain_array domains = {malloc(1 * sizeof(domain_info)), 1};
-    domains.arr[0].domain = strdup("example.com");
-    // domains.arr[0].ipv4s = get_ips(domains.arr[0].domain);
-    domains.arr[0].ipv4s = (string_array){NULL, 0};
-    domains.arr[0].ipv6s = (string_array){NULL, 0};
-    get_ipv4_ipv6(domains.arr[0].domain, &domains.arr[0].ipv4s, &domains.arr[0].ipv6s);
-    printf("Ips retrieved for domain %s:\n", domains.arr[0].domain);
-    domains.arr[0].is_blocked = false;
-    domains.arr[0].block_threshold = 2;
-    domains.arr[0].current_time_on_domain = 0;
-    domains.arr[0].last_time_packet_received = (time_t)0;
-
-    return domains;
-}
-
-void update_domain_ips(domain_info* domain) {
+void update_domain_ips(DomainInfo* domain) {
     /*
     This function updates the IPs of a given domain.
     It retrieves the current IPs and updates the domain's IPs array.
@@ -134,26 +121,35 @@ void update_domain_ips(domain_info* domain) {
     }
 }
 
-void reset_domains(domain_array* domains) {
+void unblock_domains(DomainArray* domains) {
     /*
     This function resets the blocked domains.
     */
     for (int i = 0; i < domains->count; i++) {
-        domains->arr[i].is_blocked = false;
-        domains->arr[i].current_time_on_domain = 0;
-        domains->arr[i].last_time_packet_received = (time_t)0;
-        for(int j = 0; j < domains->arr[i].ipv4s.count; j++) {
-            unblock_ipv4(domains->arr[i].ipv4s.arr[j]);
-        }
+        unblock_domain(&domains->arr[i]);
     }
 }
 
-void clean_domains(domain_array* domains) {
+void add_domain(char * domain, uint block_threshold){
+    DomainArray domains = {malloc(1 * sizeof(DomainInfo)), 1};
+    domains.arr[0].domain = strdup(domain);
+    domains.arr[0].ipv4s = (StringArray){NULL, 0};
+    domains.arr[0].ipv6s = (StringArray){NULL, 0};
+    get_ipv4_ipv6(domains.arr[0].domain, &domains.arr[0].ipv4s, &domains.arr[0].ipv6s);
+    printf("Ips retrieved for domain %s:\n", domains.arr[0].domain);
+    domains.arr[0].is_blocked = false;
+    domains.arr[0].block_threshold = block_threshold;
+    domains.arr[0].current_time_on_domain = 0;
+    domains.arr[0].last_time_packet_received = (time_t)0;
+
+    // Override the config file.
+    save_domain_array(&domains, "domains.bin");
+}
+
+void free_domains(DomainArray* domains) {
     /*
-    This function is called when the program exits.
-    It resets the blocked domains and removes any blocking rules from iptables.
+    This function frees memory of domains.
     */
-    reset_domains(domains);
 
     // Free allocated memory
     for (int i = 0; i < domains->count; i++) {
@@ -170,13 +166,13 @@ void clean_domains(domain_array* domains) {
 }
 
 
-int try_block_domain(const char* ip, IPVersion ip_version, domain_array* domains) {
+int try_block_domain(const char* ip, IPVersion ip_version, DomainArray* domains) {
     /*
     This function checks if the given IP is in the blocked domains list.
     */
 
    for(int i = 0; i < domains->count; i++) {
-        string_array ip_array;
+        StringArray ip_array;
 
         switch (ip_version)
         {
@@ -286,13 +282,21 @@ void handle_sigint(int sig) {
 
 
 int main(){
+    printf("Starting website blocker...\n");
+
     fflush(stdout);
+
     init_log("log.txt");
 
     signal(SIGINT, handle_sigint);
-    printf("Starting website blocker...\n");
-    domain_array domains = get_domain_infos();
+
+    DomainArray domains = {NULL, 0};
+
+    printf("Setting up domains...\n");
+    setup_domains(&domains);
+
     printf("Domains retrieved.\n");
+
     if (domains.arr == NULL) {
         printf("Failed to resolve domains.\n");
         return 1;
@@ -330,7 +334,8 @@ int main(){
     }
 
     // Cleanup
-    clean_domains(&domains);
+    unblock_domains(&domains);
+    free_domains(&domains);
     free(buffer);
     for (int i = 0; i < 2; i++) {
         free(src_dst_ips[i]);

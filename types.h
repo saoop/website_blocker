@@ -8,33 +8,33 @@
 typedef struct {
     int* arr;
     int count;
-} int_array;
+} IntArray;
 
 typedef struct {
     char** arr;
     int count;
-} string_array;
+} StringArray;
 
 typedef struct  {
     char* domain;
-    string_array ipv4s;
-    string_array ipv6s;
+    StringArray ipv4s;
+    StringArray ipv6s;
     bool is_blocked;
     int block_threshold; // Time in seconds to block the domain
     double current_time_on_domain; // Time in sechonds spent on the domain
     time_t last_time_packet_received;
     time_t last_time_blocked; 
-} domain_info;
+} DomainInfo;
 
 typedef struct {
-    domain_info* arr;
+    DomainInfo* arr;
     int count;
-} domain_array;
+} DomainArray;
 
 typedef struct {
     uint8_t hour_to_reset; // Hour of the day to reset the blocked domains
     uint8_t minute_to_reset; // Minute of the hour to reset the blocked domains
-} settings;
+} Settings;
 
 
 typedef enum {
