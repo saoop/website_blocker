@@ -10,6 +10,11 @@
         "udp.h": "c",
         "ip6.h": "c",
         "if_ether.h": "c",
-        "cstdlib": "c"
+        "cstdlib": "c",
+        "domains_helper.h": "c",
+        "file_helper.h": "c",
+        "logging_helper.h": "c",
+        "signal.h": "c",
+        "ip_helper.h": "c"
     }
 }

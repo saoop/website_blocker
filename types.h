@@ -5,6 +5,8 @@
 #include <stdint.h>
 #include <time.h>
 
+#define DOMAINS_FILE_UPDATE "domains_file_update"
+
 typedef struct {
     int* arr;
     int count;
