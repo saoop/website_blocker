@@ -88,14 +88,15 @@ void get_ipv4_ipv6(const char* domain, StringArray* ipv4s, StringArray* ipv6s) {
     hints.ai_family = AF_UNSPEC; // AF_INET or AF_INET6 to force version
     hints.ai_socktype = SOCK_STREAM;
 
-    if (getaddrinfo(domain, NULL, &hints, &res) != 0) {
-        perror("getaddrinfo error");
-        return;
-    }
     ipv4s->arr = NULL;
     ipv4s->count = 0;
     ipv6s->arr = NULL;
     ipv6s->count = 0;
+
+    if (getaddrinfo(domain, NULL, &hints, &res) != 0) {
+        perror("getaddrinfo error");
+        return;
+    }
 
 
     for (p = res; p != NULL; p = p->ai_next) {

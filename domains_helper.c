@@ -8,6 +8,38 @@
 
 Settings global_settings = {15, 16}; // Default Settings
 
+#define MAX_IDLE_GAP_SECONDS 60
+
+time_t last_reset_time(time_t now) {
+    struct tm tm_reset;
+
+    if (localtime_r(&now, &tm_reset) == NULL) {
+        return 0;
+    }
+
+    tm_reset.tm_hour = global_settings.hour_to_reset;
+    tm_reset.tm_min = global_settings.minute_to_reset;
+    tm_reset.tm_sec = 0;
+    tm_reset.tm_isdst = -1;
+
+    time_t reset = mktime(&tm_reset);
+
+    if (reset == (time_t)-1) {
+        return 0;
+    }
+
+    if (reset > now) {
+        tm_reset.tm_mday -= 1;
+        tm_reset.tm_isdst = -1;
+        reset = mktime(&tm_reset);
+        if (reset == (time_t)-1) {
+            return 0;
+        }
+    }
+
+    return reset;
+}
+
 
 void block_domain(DomainInfo * domain){
     domain->is_blocked = true;
@@ -41,33 +73,19 @@ void setup_domains(DomainArray* domains) {
 
     // If the program was just booted we have to check when the domains were last blocked
     time_t current_time = time(NULL);
+    time_t last_reset = last_reset_time(current_time);
 
     for (int i = 0; i < domains->count; i++) {
-        time_t last_time_blocked = domains->arr[i].last_time_blocked;
-            // Get hours and minutes of the last block
-        struct tm *tm_info = localtime(&last_time_blocked);
-        int last_block_hour = tm_info->tm_hour;
-        int last_block_minute = tm_info->tm_min;
+        time_t reference_time = domains->arr[i].is_blocked
+            ? domains->arr[i].last_time_blocked
+            : domains->arr[i].last_time_packet_received;
 
-        int hours_between_block_and_reset = global_settings.hour_to_reset - last_block_hour;
-        int minutes_between_block_and_reset = global_settings.minute_to_reset - last_block_minute;
-        int potential_reset = last_time_blocked + hours_between_block_and_reset * 3600 + minutes_between_block_and_reset * 60;
-
-        if (domains->arr[i].is_blocked){
-            if (last_time_blocked - current_time >= 24 * 3600 || current_time > potential_reset) {
-                // If the last block was more than 24 hours ago, reset the domain OR if the current time is past the reset time
-                unblock_domain(&domains->arr[i]);
-            }
-        } else {
-            // We have to check if the domain was not blocked and clear it from time on the domain if the
-            // current time is past the reset time. 
-            if (current_time > potential_reset) {
-                unblock_domain(&domains->arr[i]);
-            }
+        if (reference_time != 0 && reference_time < last_reset) {
+            unblock_domain(&domains->arr[i]);
         }
 
         update_domain_ips(&domains->arr[i]);
-        
+
     }
     
 
@@ -134,8 +152,14 @@ void free_domains(DomainArray* domains) {
             free(domains->arr[i].ipv4s.arr[j]);
         }
         free(domains->arr[i].ipv4s.arr);
+        for (int j = 0; j < domains->arr[i].ipv6s.count; j++) {
+            free(domains->arr[i].ipv6s.arr[j]);
+        }
+        free(domains->arr[i].ipv6s.arr);
     }
     free(domains->arr);
+    domains->arr = NULL;
+    domains->count = 0;
 
 
     printf("Cleanup of domains completed.\n");
@@ -179,7 +203,12 @@ int try_block_domain(const char* ip, IPVersion ip_version, DomainArray* domains)
                 time_t current_time = time(NULL);
 
                 if (domains->arr[i].last_time_packet_received != 0) {
-                    domains->arr[i].current_time_on_domain += difftime(current_time, domains->arr[i].last_time_packet_received);
+                    double gap = difftime(current_time, domains->arr[i].last_time_packet_received);
+                    // If we have a gap between 2 packets -> probably away from domain.
+                    if (gap > MAX_IDLE_GAP_SECONDS) {
+                        gap = 0;
+                    }
+                    domains->arr[i].current_time_on_domain += gap;
                 } else {
                     printf("First packet received for domain %s\n", domains->arr[i].domain);
                     domains->arr[i].current_time_on_domain = 1; // Initialize to 1 second if this is the first packet received
@@ -189,8 +218,8 @@ int try_block_domain(const char* ip, IPVersion ip_version, DomainArray* domains)
                 // Update is_blocked
                 if (domains->arr[i].current_time_on_domain > domains->arr[i].block_threshold) {
                     printf("Blocking domain %s for exceeding time threshold.\n", domains->arr[i].domain);
-                    domains->arr[i].is_blocked = true;
-                    block_ip(ip, ip_version);
+                    block_domain(&domains->arr[i]);
+                    save_domain_array(domains, "domains.bin");
                 }
 
                 

@@ -26,17 +26,30 @@ int main(int argc, char **argv[]) {
 
     printf("Loaded %d domains from file.\n", domains.count);
 
-    domains.arr = realloc(domains.arr, sizeof(DomainInfo) * (++domains.count));
-    domains.arr[domains.count - 1].domain = strdup(domain);
-    domains.arr[domains.count - 1].block_threshold = threshold;
-    domains.arr[domains.count - 1].is_blocked = false;
-    domains.arr[domains.count - 1].current_time_on_domain = 0.0;
-    domains.arr[domains.count - 1].last_time_packet_received = 0;
-    domains.arr[domains.count - 1].last_time_blocked = 0;
-    domains.arr[domains.count - 1].ipv4s.arr = NULL;
-    domains.arr[domains.count - 1].ipv4s.count = 0;
-    domains.arr[domains.count - 1].ipv6s.arr = NULL;
-    domains.arr[domains.count - 1].ipv6s.count = 0;
+    int existing = -1;
+    for (int i = 0; i < domains.count; i++) {
+        if (strcmp(domains.arr[i].domain, domain) == 0) {
+            existing = i;
+            break;
+        }
+    }
+
+    if (existing >= 0) {
+        printf("Domain %s is already tracked, updating its threshold.\n", domain);
+        domains.arr[existing].block_threshold = threshold;
+    } else {
+        domains.arr = realloc(domains.arr, sizeof(DomainInfo) * (++domains.count));
+        domains.arr[domains.count - 1].domain = strdup(domain);
+        domains.arr[domains.count - 1].block_threshold = threshold;
+        domains.arr[domains.count - 1].is_blocked = false;
+        domains.arr[domains.count - 1].current_time_on_domain = 0.0;
+        domains.arr[domains.count - 1].last_time_packet_received = 0;
+        domains.arr[domains.count - 1].last_time_blocked = 0;
+        domains.arr[domains.count - 1].ipv4s.arr = NULL;
+        domains.arr[domains.count - 1].ipv4s.count = 0;
+        domains.arr[domains.count - 1].ipv6s.arr = NULL;
+        domains.arr[domains.count - 1].ipv6s.count = 0;
+    }
 
     save_domain_array(&domains, "domains.bin");
 

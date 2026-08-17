@@ -5,6 +5,7 @@
 #include "types.h"
 #include "ip_helper.h"
 
+time_t last_reset_time(time_t now);
 void block_domain(DomainInfo * domain);
 void unblock_domain(DomainInfo * domain);
 void setup_domains(DomainArray* domains);

@@ -46,10 +46,17 @@ void on_startup() {
 
 
 int process_packet(unsigned char* buffer, int size, char** ip,IPVersion * ip_version) {
+    if (size < (int)sizeof(struct ethhdr)) {
+        return 1;
+    }
+
     struct ethhdr *eth = (struct ethhdr*)buffer;
     uint16_t eth_type = ntohs(eth->h_proto);
 
     if (eth_type == ETH_P_IP){
+        if (size < (int)(sizeof(struct ethhdr) + sizeof(struct iphdr))) {
+            return 1;
+        }
 
         struct iphdr *iph = (struct iphdr*)(buffer + sizeof(struct ethhdr));
         char src[INET_ADDRSTRLEN], dst[INET_ADDRSTRLEN];
@@ -61,7 +68,11 @@ int process_packet(unsigned char* buffer, int size, char** ip,IPVersion * ip_ver
         return 0;
 
     } else if (eth_type == ETH_P_IPV6){
-        struct ip6_hdr *ip6 = (struct ip6_hdr*)(buffer + sizeof(struct ethhdr));        
+        if (size < (int)(sizeof(struct ethhdr) + sizeof(struct ip6_hdr))) {
+            return 1;
+        }
+
+        struct ip6_hdr *ip6 = (struct ip6_hdr*)(buffer + sizeof(struct ethhdr));
         char src[INET6_ADDRSTRLEN], dst[INET6_ADDRSTRLEN];
 
         if (!inet_ntop(AF_INET6, &ip6->ip6_src, src, sizeof(src))) {
@@ -163,7 +174,6 @@ int main(){
 
     IPVersion ip_version = IPV4;
 
-    char** src_dst_ips = malloc(2 * sizeof(char*));
     while (!interrupted) {
             int data_size = recvfrom(sock_raw, buffer, 65536, 0, &saddr, (socklen_t*)&saddr_size);
             if (data_size < 0) {
@@ -183,13 +193,10 @@ int main(){
     pthread_kill(client_thread, NULL);
 
     // Cleanup
+    save_domain_array(&domains, DOMAINS_FILE);
     unblock_domains(&domains);
     free_domains(&domains);
     free(buffer);
-    for (int i = 0; i < 2; i++) {
-        free(src_dst_ips[i]);
-    }
-    free(src_dst_ips);
     close(sock_raw);
 
     
